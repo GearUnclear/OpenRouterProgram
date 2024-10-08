@@ -3,14 +3,16 @@
 import sys
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QComboBox, QTextEdit, QPushButton, QSpinBox, QMessageBox, QDialog, QLineEdit, QButtonGroup, QRadioButton, QMenu, QAction
+    QLabel, QComboBox, QTextEdit, QPushButton, QSpinBox, QMessageBox,
+    QLineEdit, QMenu, QAction, QDialog, QMenuBar
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QEvent
 from PyQt5.QtGui import QTextCursor
 
-# Import the API module and mdizer
+# Import the API module, mdizer, and response_picker
 from api_module import get_api_key, make_api_request
 import mdizer
+from response_picker import ResponsePicker
 
 # List of models
 MODELS = [
@@ -112,12 +114,34 @@ class ChatWindow(QMainWindow):
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
 
+        # Menu bar
+        menu_bar = self.menuBar()
+        chat_menu = menu_bar.addMenu('Chat')
+
+        clear_chat_action = QAction('Clear Chat', self)
+        clear_chat_action.triggered.connect(self.clear_chat)
+        chat_menu.addAction(clear_chat_action)
+
         # Retrieve API key
         try:
             self.api_key = get_api_key("API_KEY_OPENROUTER")
         except Exception as e:
             QMessageBox.critical(self, "API Key Error", str(e))
             self.close()
+
+    def clear_chat(self):
+        confirmation = QMessageBox.question(
+            self,
+            "Clear Chat",
+            "Are you sure you want to clear the chat? This will erase the conversation history.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if confirmation == QMessageBox.Yes:
+            self.message_history.clear()
+            self.message_positions.clear()
+            self.chat_display.clear()
+            QMessageBox.information(self, "Chat Cleared", "The chat has been cleared.")
 
     def handle_user_input(self):
         user_input = self.prompt_input.text().strip()
@@ -152,42 +176,15 @@ class ChatWindow(QMainWindow):
             self.message_history.append({"role": "assistant", "content": content})
             self.display_message("Assistant", content, is_html=True)
         else:
-            # Multiple choices, let the user select one
-            self.present_choices(choices)
-
-    def present_choices(self, choices):
-        self.choice_dialog = QDialog(self)
-        self.choice_dialog.setWindowTitle("Select a Response")
-        dialog_layout = QVBoxLayout()
-
-        instruction_label = QLabel("Please select one of the responses to continue the chat:")
-        dialog_layout.addWidget(instruction_label)
-
-        self.choice_buttons = QButtonGroup(self.choice_dialog)
-        for idx, choice in enumerate(choices):
-            content = choice["message"]["content"].strip()
-            radio_button = QRadioButton(f"Choice {idx + 1}:\n{content}")
-            self.choice_buttons.addButton(radio_button, idx)
-            dialog_layout.addWidget(radio_button)
-
-        select_button = QPushButton("Select")
-        select_button.clicked.connect(self.apply_selected_choice)
-        dialog_layout.addWidget(select_button)
-
-        self.choice_dialog.setLayout(dialog_layout)
-        self.choice_dialog.exec_()
-
-    def apply_selected_choice(self):
-        selected_id = self.choice_buttons.checkedId()
-        if selected_id == -1:
-            QMessageBox.warning(self.choice_dialog, "Selection Error", "Please select a response.")
-            return
-
-        selected_button = self.choice_buttons.button(selected_id)
-        content = selected_button.text().split(":\n", 1)[1]
-        self.message_history.append({"role": "assistant", "content": content})
-        self.display_message("Assistant", content, is_html=True)
-        self.choice_dialog.accept()
+            # Multiple choices, use the ResponsePicker
+            response_picker = ResponsePicker(self, choices)
+            if response_picker.exec_() == QDialog.Accepted:
+                selected_content = response_picker.get_selected_content()
+                if selected_content:
+                    self.message_history.append({"role": "assistant", "content": selected_content})
+                    self.display_message("Assistant", selected_content, is_html=True)
+            else:
+                QMessageBox.warning(self, "Selection Cancelled", "No response was selected.")
 
     def display_message(self, sender, message, is_html=False):
         cursor = self.chat_display.textCursor()
@@ -270,8 +267,9 @@ class ChatWindow(QMainWindow):
             self.message_history[index]['content'] = new_content
             # Remove messages after the edited one
             self.message_history = self.message_history[:index + 1]
-            self.message_positions = self.message_positions[:index]
             self.chat_display.clear()
+            # Reset message_positions
+            self.message_positions = []
             # Re-display messages up to the edited message
             for i in range(len(self.message_history)):
                 message = self.message_history[i]
