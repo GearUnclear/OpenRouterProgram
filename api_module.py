@@ -27,7 +27,7 @@ def get_api_key(credential_name: str) -> str:
     except Exception as e:
         raise Exception(f"Error retrieving API key: {e}")
 
-def make_api_request(api_key: str, message_history: list, model: str) -> dict:
+def make_api_request(api_key: str, message_history: list, model: str, temperature: float = 1.0) -> dict:
     """
     Make a POST request to the OpenRouter API for a specific model.
 
@@ -35,6 +35,7 @@ def make_api_request(api_key: str, message_history: list, model: str) -> dict:
         api_key (str): The API key for authorization.
         message_history (list): The conversation history.
         model (str): The AI model to use for generating a response.
+        temperature (float, optional): Sampling temperature. Defaults to 1.0.
 
     Returns:
         dict: The JSON response from the API.
@@ -49,7 +50,8 @@ def make_api_request(api_key: str, message_history: list, model: str) -> dict:
     }
     payload = {
         "model": model,
-        "messages": message_history
+        "messages": message_history,
+        "temperature": temperature  # Added temperature to the payload
     }
 
     try:
