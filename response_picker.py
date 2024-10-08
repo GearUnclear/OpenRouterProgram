@@ -7,7 +7,6 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QIcon
 
-
 class ChoiceWidget(QWidget):
     """
     A custom widget that combines a QRadioButton with a QLabel to display
@@ -16,6 +15,7 @@ class ChoiceWidget(QWidget):
     def __init__(self, text, index, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
 
         self.radio_button = QRadioButton()
         self.label = QLabel()
@@ -41,6 +41,9 @@ class ResponsePicker(QDialog):
         self.applyStyles()
 
     def initUI(self, choices):
+        """
+        Initializes the UI with response choices.
+        """
         dialog_layout = QVBoxLayout()
         dialog_layout.setContentsMargins(15, 15, 15, 15)
         dialog_layout.setSpacing(15)
@@ -90,9 +93,12 @@ class ResponsePicker(QDialog):
             scroll_layout.addWidget(choice_widget)
             self.choice_widgets.append(choice_widget)
 
+        # Spacer to push items to the top
+        scroll_layout.addStretch()
+
         scroll_content.setLayout(scroll_layout)
         scroll_area.setWidget(scroll_content)
-        scroll_area.setMaximumHeight(300)  # Adjust as needed
+        scroll_area.setMaximumHeight(300)  # Adjust as needed for up to 6 choices
         dialog_layout.addWidget(scroll_area)
 
         # Button Layout

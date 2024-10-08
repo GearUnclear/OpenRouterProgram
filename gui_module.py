@@ -20,7 +20,10 @@ MODELS = [
     "liquid/lfm-40b:free",
     "meta-llama/llama-3.2-3b-instruct:free",
     "google/gemini-flash-1.5-8b",
-    "meta-llama/llama-3.1-8b-instruct:free"
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "openai/gpt-4o-mini",
+    "meta-llama/llama-3.1-70b-instruct:free",
+    "meta-llama/llama-3.1-70b-instruct"
 ]
 
 class APICallThread(QThread):
@@ -31,19 +34,21 @@ class APICallThread(QThread):
     no_responses = pyqtSignal()            # Emits if no responses are received
     progress_update = pyqtSignal(int)      # Emits the number of chunks received for progress bar
 
-    def __init__(self, api_key, message_history, model, num_choices=1):
+    def __init__(self, api_key, message_history, model, temperature_values, num_choices=1):
         super().__init__()
         self.api_key = api_key
         self.message_history = message_history.copy()
         self.model = model
+        self.temperature_values = temperature_values
         self.num_choices = num_choices
 
     def run(self):
         choices = []
         try:
             for i in range(self.num_choices):
-                # Determine temperature for each choice
-                temperature = 0.5 if i % 2 == 0 else 1.5
+                # Use the provided temperature values
+                temperature = self.temperature_values[i % len(self.temperature_values)]
+                print(f"Choice {i+1}, Temperature: {temperature}")  # Debug statement
 
                 response_text = ''
                 # Make the streaming API request
@@ -106,7 +111,7 @@ class ChatWindow(QMainWindow):
         choices_label = QLabel("Number of Choices:")
         self.choices_spin = QSpinBox()
         self.choices_spin.setMinimum(1)
-        self.choices_spin.setMaximum(5)
+        self.choices_spin.setMaximum(6)  # Updated maximum to 6
         self.choices_spin.setValue(1)
         choices_layout.addWidget(choices_label)
         choices_layout.addWidget(self.choices_spin)
@@ -206,6 +211,12 @@ class ChatWindow(QMainWindow):
         self.model_name = self.model_combo.currentText()
         num_choices = self.choices_spin.value()
 
+        # Define the temperature values
+        all_temperatures = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        temperature_values = all_temperatures[:num_choices]  # Adjust based on num_choices
+
+        print(f"Number of choices: {num_choices}, Temperatures: {temperature_values}")  # Debug statement
+
         # Initialize progress bar
         self.progress_bar.setMaximum(0)  # Indeterminate
         self.progress_bar.setValue(0)
@@ -220,6 +231,7 @@ class ChatWindow(QMainWindow):
             api_key=self.api_key,
             message_history=self.message_history,
             model=self.model_name,
+            temperature_values=temperature_values,
             num_choices=num_choices
         )
         self.thread.response_ready.connect(self.handle_responses)
@@ -264,7 +276,8 @@ class ChatWindow(QMainWindow):
         # Delete the last user message
         if self.message_history and self.message_history[-1]["role"] == "user":
             last_message = self.message_history.pop()
-            self.message_positions.pop()
+            if self.message_positions:
+                self.message_positions.pop()
             self.chat_display.undo()  # Undo the last display
             self.alert_user_no_responses(last_message["content"])
         else:
