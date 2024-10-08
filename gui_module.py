@@ -23,7 +23,8 @@ MODELS = [
     "meta-llama/llama-3.1-8b-instruct:free",
     "openai/gpt-4o-mini",
     "meta-llama/llama-3.1-70b-instruct:free",
-    "meta-llama/llama-3.1-70b-instruct"
+    "meta-llama/llama-3.1-70b-instruct",
+    "anthropic/claude-3.5-sonnet:beta"
 ]
 
 class APICallThread(QThread):
