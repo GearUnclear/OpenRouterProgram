@@ -27,7 +27,7 @@ def get_api_key(credential_name: str) -> str:
     except Exception as e:
         raise Exception(f"Error retrieving API key: {e}")
 
-def make_api_request(api_key: str, message_history: list, model: str, temperature: float = 1.0) -> dict:
+def make_api_request(api_key: str, message_history: list, model: str, temperature: float = 1.0, stream: bool = False):
     """
     Make a POST request to the OpenRouter API for a specific model.
 
@@ -36,9 +36,13 @@ def make_api_request(api_key: str, message_history: list, model: str, temperatur
         message_history (list): The conversation history.
         model (str): The AI model to use for generating a response.
         temperature (float, optional): Sampling temperature. Defaults to 1.0.
+        stream (bool, optional): Whether to stream the response in chunks.
+
+    Yields:
+        str: The content chunk from the AI response.
 
     Returns:
-        dict: The JSON response from the API.
+        dict: The JSON response from the API if stream is False.
 
     Raises:
         Exception: If the request fails or the response is invalid.
@@ -51,39 +55,40 @@ def make_api_request(api_key: str, message_history: list, model: str, temperatur
     payload = {
         "model": model,
         "messages": message_history,
-        "temperature": temperature  # Added temperature to the payload
+        "temperature": temperature,
+        "stream": stream
     }
 
     try:
-        response = requests.post(url, headers=headers, json=payload)
-        response.raise_for_status()  # Raises HTTPError for bad responses
-        return response.json()
+        with requests.post(url, headers=headers, json=payload, stream=stream) as response:
+            response.raise_for_status()  # Raises HTTPError for bad responses
+
+            if stream:
+                # Stream the response chunk by chunk
+                for chunk in response.iter_lines():
+                    if chunk:
+                        decoded_chunk = chunk.decode("utf-8")
+                        if decoded_chunk.strip() == "[DONE]":
+                            break
+                        else:
+                            # Remove 'data: ' prefix if present
+                            if decoded_chunk.startswith('data: '):
+                                decoded_chunk = decoded_chunk[len('data: '):]
+
+                            try:
+                                chunk_data = json.loads(decoded_chunk)
+                                # Extract the content from the chunk
+                                if "choices" in chunk_data:
+                                    delta = chunk_data["choices"][0].get("delta", {})
+                                    if "content" in delta:
+                                        text = delta["content"]
+                                        yield text
+                            except json.JSONDecodeError:
+                                continue
+            else:
+                # Non-streaming: return the full JSON response
+                return response.json()
     except requests.exceptions.RequestException as e:
         raise Exception(f"API request failed for model '{model}': {e}")
     except json.JSONDecodeError:
         raise Exception("Failed to decode JSON response.")
-
-def format_response(response_json: dict, model: str) -> str:
-    """
-    Formats the JSON response into a clean, readable string.
-
-    Args:
-        response_json (dict): The JSON response from the API.
-        model (str): The model that was used for the request.
-
-    Returns:
-        str: The formatted response.
-    """
-    formatted_output = f"### Model: {model}\n"
-    if "choices" in response_json and len(response_json["choices"]) > 0:
-        for i, choice in enumerate(response_json["choices"], start=1):
-            content = choice.get('message', {}).get('content', '').strip()
-            if content:
-                formatted_output += f"**Choice {i}:**\n{content}\n\n"
-    elif "error" in response_json:
-        formatted_output += f"**Error:** {response_json['error']}\n"
-    else:
-        formatted_output += "Unexpected response format.\n"
-    
-    formatted_output += "-" * 50 + "\n"
-    return formatted_output

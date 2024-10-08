@@ -6,10 +6,10 @@ from PyQt5.QtWidgets import (
     QLabel, QComboBox, QTextEdit, QPushButton, QSpinBox, QMessageBox,
     QLineEdit, QMenu, QAction, QDialog, QMenuBar, QProgressBar
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QEvent
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QTextCursor
 
-# Import the API module, mdizer, and response_picker
+# Import the updated API module
 from api_module import get_api_key, make_api_request
 import mdizer
 from response_picker import ResponsePicker
@@ -24,9 +24,12 @@ MODELS = [
 ]
 
 class APICallThread(QThread):
-    responses_ready = pyqtSignal(list)  # Signal to emit received responses
-    no_responses = pyqtSignal()         # Signal to emit when no responses are received
-    progress_update = pyqtSignal(int)    # Signal to emit progress updates
+    """
+    Worker thread to handle API calls without blocking the GUI.
+    """
+    response_ready = pyqtSignal(list)      # Emits the list of choices once all responses are received
+    no_responses = pyqtSignal()            # Emits if no responses are received
+    progress_update = pyqtSignal(int)      # Emits the number of chunks received for progress bar
 
     def __init__(self, api_key, message_history, model, num_choices=1):
         super().__init__()
@@ -42,38 +45,35 @@ class APICallThread(QThread):
                 # Determine temperature for each choice
                 temperature = 0.5 if i % 2 == 0 else 1.5
 
-                response_json = make_api_request(
+                response_text = ''
+                # Make the streaming API request
+                for chunk in make_api_request(
                     api_key=self.api_key,
                     message_history=self.message_history,
                     model=self.model,
-                    temperature=temperature  # Pass varying temperature
-                )
+                    temperature=temperature,
+                    stream=True
+                ):
+                    response_text += chunk
+                    self.progress_update.emit(1)  # Emit one chunk received
 
-                if "choices" in response_json and len(response_json["choices"]) > 0:
-                    choice = response_json["choices"][0]
-                    choices.append(choice)
-                    self.progress_update.emit(len(choices))  # Emit progress
-                elif "error" in response_json:
-                    error_message = response_json.get("error", "Unknown error occurred.")
-                    # Log the error if needed
-                    print(f"API Error: {error_message}")
-                    break  # Stop further processing on error
-                else:
-                    # Unexpected response format
-                    print("Unexpected response format from API.")
-                    break  # Stop further processing on unexpected format
-
+                # After the full response is received
+                choice = {'message': {'content': response_text}}
+                choices.append(choice)
         except Exception as e:
             # Log the exception if needed
             print(f"Exception during API call: {str(e)}")
 
         # After attempting all API calls, determine what to emit
         if choices:
-            self.responses_ready.emit(choices)
+            self.response_ready.emit(choices)
         else:
             self.no_responses.emit()
 
 class ChatWindow(QMainWindow):
+    """
+    Main window of the chat application.
+    """
     def __init__(self):
         super().__init__()
         self.setWindowTitle("OpenRouter Chat Interface")
@@ -85,6 +85,9 @@ class ChatWindow(QMainWindow):
         self.initUI()
 
     def initUI(self):
+        """
+        Initializes the user interface.
+        """
         # Main widget and layout
         main_widget = QWidget()
         main_layout = QVBoxLayout()
@@ -129,7 +132,7 @@ class ChatWindow(QMainWindow):
 
         # Progress Bar Layout
         progress_layout = QHBoxLayout()
-        self.progress_label = QLabel("Progress: 0/0")
+        self.progress_label = QLabel("Progress: 0")
         self.progress_bar = QProgressBar()
         self.progress_bar.setMinimum(0)
         self.progress_bar.setMaximum(0)  # Indeterminate initially
@@ -157,18 +160,18 @@ class ChatWindow(QMainWindow):
             QMessageBox.critical(self, "API Key Error", str(e))
             self.close()
 
-    def update_progress(self, received):
-        total = self.choices_spin.value()
-        self.progress_label.setText(f"Progress: {received}/{total}")
-        self.progress_bar.setValue(received)
-        if received >= total:
-            self.progress_bar.setVisible(False)
-            self.progress_label.setVisible(False)
-        else:
-            self.progress_bar.setVisible(True)
-            self.progress_label.setVisible(True)
+    def update_progress(self, chunks_received):
+        """
+        Updates the progress bar based on the number of chunks received.
+        """
+        current_value = self.progress_bar.value() + chunks_received
+        self.progress_bar.setValue(current_value)
+        self.progress_label.setText(f"Chunks received: {current_value}")
 
     def clear_chat(self):
+        """
+        Clears the chat history and the display.
+        """
         confirmation = QMessageBox.question(
             self,
             "Clear Chat",
@@ -183,6 +186,9 @@ class ChatWindow(QMainWindow):
             QMessageBox.information(self, "Chat Cleared", "The chat has been cleared.")
 
     def handle_user_input(self):
+        """
+        Handles the user's input when they send a message.
+        """
         user_input = self.prompt_input.text().strip()
         if not user_input:
             QMessageBox.warning(self, "Input Error", "Please enter a message.")
@@ -194,16 +200,21 @@ class ChatWindow(QMainWindow):
         self.start_api_call()
 
     def start_api_call(self):
-        # Start the API call
+        """
+        Initiates the API call in a separate thread.
+        """
         self.model_name = self.model_combo.currentText()
         num_choices = self.choices_spin.value()
 
         # Initialize progress bar
-        self.progress_bar.setMaximum(num_choices)
+        self.progress_bar.setMaximum(0)  # Indeterminate
         self.progress_bar.setValue(0)
-        self.progress_label.setText(f"Progress: 0/{num_choices}")
+        self.progress_label.setText("Chunks received: 0")
         self.progress_bar.setVisible(True)
         self.progress_label.setVisible(True)
+
+        # Disable input during API call
+        self.prompt_input.setEnabled(False)
 
         self.thread = APICallThread(
             api_key=self.api_key,
@@ -211,15 +222,25 @@ class ChatWindow(QMainWindow):
             model=self.model_name,
             num_choices=num_choices
         )
-        self.thread.responses_ready.connect(self.handle_responses)
+        self.thread.response_ready.connect(self.handle_responses)
         self.thread.no_responses.connect(self.handle_no_responses)
         self.thread.progress_update.connect(self.update_progress)
+        self.thread.finished.connect(self.api_call_finished)
         self.thread.start()
 
+    def api_call_finished(self):
+        """
+        Re-enables the input after the API call is finished.
+        """
+        self.prompt_input.setEnabled(True)
+
     def handle_responses(self, choices):
+        """
+        Handles the responses received from the API.
+        """
         self.progress_bar.setVisible(False)
         self.progress_label.setVisible(False)
-        
+
         if len(choices) == 1:
             # Only one choice, continue the chat
             content = choices[0]["message"]["content"].strip()
@@ -237,6 +258,9 @@ class ChatWindow(QMainWindow):
                 QMessageBox.warning(self, "Selection Cancelled", "No response was selected.")
 
     def handle_no_responses(self):
+        """
+        Handles the scenario where no responses are received.
+        """
         # Delete the last user message
         if self.message_history and self.message_history[-1]["role"] == "user":
             last_message = self.message_history.pop()
@@ -248,6 +272,9 @@ class ChatWindow(QMainWindow):
             self.alert_user_no_responses(None)
 
     def alert_user_no_responses(self, last_message_content):
+        """
+        Alerts the user that no responses were received.
+        """
         error_dialog = QMessageBox(self)
         error_dialog.setWindowTitle("Error")
         if last_message_content:
@@ -267,11 +294,17 @@ class ChatWindow(QMainWindow):
                 self.copy_message_to_clipboard(last_message_content)
 
     def copy_message_to_clipboard(self, message):
+        """
+        Copies a message to the clipboard.
+        """
         clipboard = QApplication.clipboard()
         clipboard.setText(message)
         QMessageBox.information(self, "Copied", "Your last message has been copied to the clipboard.")
 
     def display_message(self, sender, message, is_html=False):
+        """
+        Displays a message in the chat window.
+        """
         cursor = self.chat_display.textCursor()
         cursor.movePosition(QTextCursor.End)
 
@@ -289,6 +322,9 @@ class ChatWindow(QMainWindow):
         self.chat_display.moveCursor(QTextCursor.End)
 
     def show_chat_context_menu(self, position):
+        """
+        Shows a context menu for editing messages.
+        """
         cursor = self.chat_display.cursorForPosition(position)
         pos = cursor.position()
 
@@ -309,6 +345,9 @@ class ChatWindow(QMainWindow):
             QMessageBox.warning(self, "Error", "Could not determine the message to edit.")
 
     def edit_message_in_place(self, index):
+        """
+        Allows the user to edit a message in place.
+        """
         if 0 <= index < len(self.message_history):
             message = self.message_history[index]
             role = message['role']
@@ -351,6 +390,9 @@ class ChatWindow(QMainWindow):
             self.chat_display.append("<b>Error:</b> Invalid message index.")
 
     def edit_message(self, index, new_content):
+        """
+        Edits a message in the message history and updates the display.
+        """
         if 0 <= index < len(self.message_history):
             self.message_history[index]['content'] = new_content
             # Remove messages after the edited one
@@ -372,11 +414,17 @@ class ChatWindow(QMainWindow):
             self.chat_display.append("<b>Error:</b> Invalid message index.")
 
     def copy_message_to_clipboard(self, message):
+        """
+        Copies a message to the clipboard.
+        """
         clipboard = QApplication.clipboard()
         clipboard.setText(message)
         QMessageBox.information(self, "Copied", "Your last message has been copied to the clipboard.")
 
 def main():
+    """
+    Entry point of the application.
+    """
     app = QApplication(sys.argv)
     window = ChatWindow()
     window.show()
