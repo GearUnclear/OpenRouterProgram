@@ -314,19 +314,11 @@ class ChatWindow(QMainWindow):
             if response_picker.exec_() == QDialog.Accepted:
                 selected_content = response_picker.get_selected_content()
                 if selected_content:
-                    # Extract plain text from HTML
-                    plain_text = self.extract_text_from_html(selected_content)
-                    self.message_history.append({"role": "assistant", "content": plain_text})
-                    self.display_message("Assistant", plain_text)
+                    # Directly use the markdown content without converting to plain text
+                    self.message_history.append({"role": "assistant", "content": selected_content})
+                    self.display_message("Assistant", selected_content)
             else:
                 QMessageBox.warning(self, "Selection Cancelled", "No response was selected.")
-
-    def extract_text_from_html(self, html_content):
-        # Add this method to extract plain text from HTML
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html_content, 'html.parser')
-        return soup.get_text()
-
 
     def handle_no_responses(self):
         """
