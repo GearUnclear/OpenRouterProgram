@@ -2,10 +2,12 @@
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QButtonGroup, QRadioButton,
-    QPushButton, QScrollArea, QWidget, QHBoxLayout, QSizePolicy, QFrame
+    QPushButton, QScrollArea, QWidget, QHBoxLayout, QSizePolicy, QFrame,
+    QTextBrowser  # Import QTextBrowser
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QIcon
+import mdizer  # Add this import
 
 class ChoiceWidget(QWidget):
     """
@@ -18,11 +20,16 @@ class ChoiceWidget(QWidget):
         layout.setContentsMargins(5, 5, 5, 5)
 
         self.radio_button = QRadioButton()
-        self.label = QLabel()
-        self.label.setText(f"<div style='max-width: 350px; word-wrap: break-word;'>{text}</div>")
+        self.label = QTextBrowser()  # Use QTextBrowser for better HTML rendering
+        
+        # Convert markdown to HTML
+        html_content = mdizer.markdown_to_html(text)
+        self.label.setHtml(f"<div style='max-width: 350px; word-wrap: break-word;'>{html_content}</div>")
+        
+        self.label.setReadOnly(True)
+        self.label.setOpenExternalLinks(True)
+        self.label.setStyleSheet("QTextBrowser { background-color: transparent; border: none; }")
         self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.label.setWordWrap(True)
-        self.label.setStyleSheet("QLabel { margin-left: 10px; }")  # Optional, for padding between button and text
 
         layout.addWidget(self.radio_button)
         layout.addWidget(self.label)
@@ -170,8 +177,8 @@ class ResponsePicker(QDialog):
             # No selection made
             return
         selected_widget = self.choice_widgets[selected_id]
-        # Extract content from QLabel's text, stripping HTML tags
-        self.selected_content = selected_widget.label.text().strip()
+        # Get the HTML content instead of plain text
+        self.selected_content = selected_widget.label.toHtml()
         self.accept()
 
     def get_selected_content(self):

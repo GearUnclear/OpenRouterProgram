@@ -1,9 +1,10 @@
 # chat_interface.py
 
 import sys
+import json
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QComboBox, QTextEdit, QPushButton, QSpinBox, QMessageBox,
+    QLabel, QComboBox, QTextBrowser, QPushButton, QSpinBox, QMessageBox,
     QLineEdit, QMenu, QAction, QDialog, QMenuBar, QProgressBar
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
@@ -13,21 +14,10 @@ from PyQt5.QtGui import QTextCursor
 from api_module import get_api_key, make_api_request
 import mdizer
 from response_picker import ResponsePicker
-import json
 from model_list import ModelListWindow
-
-# List of models
-MODELS = [
-    "nousresearch/hermes-3-llama-3.1-405b:free",
-    "liquid/lfm-40b:free",
-    "meta-llama/llama-3.2-3b-instruct:free",
-    "google/gemini-flash-1.5-8b",
-    "meta-llama/llama-3.1-8b-instruct:free",
-    "openai/gpt-4o-mini",
-    "meta-llama/llama-3.1-70b-instruct:free",
-    "meta-llama/llama-3.1-70b-instruct",
-    "anthropic/claude-3.5-sonnet:beta"
-]
+import markdown
+# Import BeautifulSoup for HTML parsing
+from bs4 import BeautifulSoup
 
 class APICallThread(QThread):
     """
@@ -37,19 +27,21 @@ class APICallThread(QThread):
     no_responses = pyqtSignal()            # Emits if no responses are received
     progress_update = pyqtSignal(int)      # Emits the number of chunks received for progress bar
 
-    def __init__(self, api_key, message_history, model, temperature_values, num_choices=1):
-        super().__init__()
+    def __init__(self, api_key, message_history, model, temperature_values, num_choices=1, context_length=None, max_completion_tokens=None, parent=None):
+        super().__init__(parent)
         self.api_key = api_key
         self.message_history = message_history.copy()
         self.model = model
         self.temperature_values = temperature_values
         self.num_choices = num_choices
+        self.context_length = context_length
+        self.max_completion_tokens = max_completion_tokens
+        self.parent = parent  # Reference to the main window for HTML extraction
 
     def run(self):
         choices = []
         try:
             for i in range(self.num_choices):
-                # Use the provided temperature values
                 temperature = self.temperature_values[i % len(self.temperature_values)]
                 print(f"Choice {i+1}, Temperature: {temperature}")  # Debug statement
 
@@ -60,13 +52,18 @@ class APICallThread(QThread):
                     message_history=self.message_history,
                     model=self.model,
                     temperature=temperature,
-                    stream=True
+                    stream=True,
+                    context_length=self.context_length,
+                    max_completion_tokens=self.max_completion_tokens
                 ):
                     response_text += chunk
                     self.progress_update.emit(1)  # Emit one chunk received
 
                 # After the full response is received
-                choice = {'message': {'content': response_text}}
+                # Extract plain text from HTML
+                plain_text = self.parent.extract_text_from_html(response_text)
+
+                choice = {'message': {'content': plain_text}}
                 choices.append(choice)
         except Exception as e:
             # Log the exception if needed
@@ -88,6 +85,9 @@ class ChatWindow(QMainWindow):
         self.setGeometry(100, 100, 800, 600)
         self.api_key = ""
         self.model_name = ""
+        self.model_id = ""
+        self.context_length = 0
+        self.max_completion_tokens = 0
         self.message_history = []
         self.message_positions = []
         self.initUI()
@@ -130,9 +130,10 @@ class ChatWindow(QMainWindow):
         choices_layout.addWidget(self.choices_spin)
         main_layout.addLayout(choices_layout)
 
-        # Chat display
-        self.chat_display = QTextEdit()
+        # Chat display using QTextBrowser for better HTML rendering
+        self.chat_display = QTextBrowser()
         self.chat_display.setReadOnly(True)
+        self.chat_display.setOpenExternalLinks(True)  # Enable clickable links
         self.chat_display.setContextMenuPolicy(Qt.CustomContextMenu)
         self.chat_display.customContextMenuRequested.connect(self.show_chat_context_menu)
         main_layout.addWidget(self.chat_display)
@@ -183,9 +184,26 @@ class ChatWindow(QMainWindow):
             QMessageBox.critical(self, "API Key Error", str(e))
             self.close()
 
-        # At the beginning of the class, after loading the model data:
+        # After loading the model data:
         self.model_data = model_data['data']
         self.model_id_map = {model['name']: model['id'] for model in self.model_data}
+
+    def extract_text_from_html(self, html_content):
+        """
+        Extracts plain text from HTML content.
+
+        Args:
+            html_content (str): The HTML content to extract text from.
+
+        Returns:
+            str: The extracted plain text.
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            return soup.get_text()
+        except Exception as e:
+            print(f"Error extracting text from HTML: {e}")
+            return html_content  # Return the original content if extraction fails
 
     def update_progress(self, chunks_received):
         """
@@ -231,7 +249,7 @@ class ChatWindow(QMainWindow):
         Initiates the API call in a separate thread.
         """
         self.model_name = self.model_combo.currentText()
-        model_id = self.model_id_map.get(self.model_name)
+        model_id = self.model_id_map.get(self.model_name, self.model_id)
         if not model_id:
             QMessageBox.warning(self, "Model Error", f"Could not find ID for model: {self.model_name}")
             return
@@ -254,12 +272,19 @@ class ChatWindow(QMainWindow):
         # Disable input during API call
         self.prompt_input.setEnabled(False)
 
+        # Use the stored context_length and max_completion_tokens if available
+        context_length = self.context_length if self.context_length > 0 else None
+        max_completion_tokens = self.max_completion_tokens if self.max_completion_tokens > 0 else None
+
         self.thread = APICallThread(
             api_key=self.api_key,
             message_history=self.message_history,
-            model=model_id,  # Use the model ID instead of the name
+            model=model_id,
             temperature_values=temperature_values,
-            num_choices=num_choices
+            num_choices=num_choices,
+            context_length=context_length,
+            max_completion_tokens=max_completion_tokens,
+            parent=self  # Pass reference to extract_text_from_html
         )
         self.thread.response_ready.connect(self.handle_responses)
         self.thread.no_responses.connect(self.handle_no_responses)
@@ -281,20 +306,27 @@ class ChatWindow(QMainWindow):
         self.progress_label.setVisible(False)
 
         if len(choices) == 1:
-            # Only one choice, continue the chat
             content = choices[0]["message"]["content"].strip()
             self.message_history.append({"role": "assistant", "content": content})
             self.display_message("Assistant", content)
         else:
-            # Multiple choices, use the ResponsePicker
             response_picker = ResponsePicker(self, choices)
             if response_picker.exec_() == QDialog.Accepted:
                 selected_content = response_picker.get_selected_content()
                 if selected_content:
-                    self.message_history.append({"role": "assistant", "content": selected_content})
-                    self.display_message("Assistant", selected_content)
+                    # Extract plain text from HTML
+                    plain_text = self.extract_text_from_html(selected_content)
+                    self.message_history.append({"role": "assistant", "content": plain_text})
+                    self.display_message("Assistant", plain_text)
             else:
                 QMessageBox.warning(self, "Selection Cancelled", "No response was selected.")
+
+    def extract_text_from_html(self, html_content):
+        # Add this method to extract plain text from HTML
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html_content, 'html.parser')
+        return soup.get_text()
+
 
     def handle_no_responses(self):
         """
@@ -339,32 +371,47 @@ class ChatWindow(QMainWindow):
         """
         clipboard = QApplication.clipboard()
         clipboard.setText(message)
-        QMessageBox.information(self, "Copied", "Your last message has been copied to the clipboard.")
+        QMessageBox.information(self, "Copied", "Your message has been copied to the clipboard.")
 
-    def display_message(self, sender, message, is_html=False):
+    def display_message(self, sender, message):
         """
-        Displays a message in the chat window.
+        Displays a message in the chat window with proper markdown formatting.
         """
+        if sender.lower() == "assistant":
+            try:
+                formatted_message = mdizer.markdown_to_html(message)
+            except Exception as e:
+                formatted_message = self.escape_html(message)
+                print(f"Markdown conversion failed: {e}")
+        else:
+            formatted_message = self.escape_html(message)
+
+        full_message = f"<b>{sender}:</b><br>{formatted_message}<br><br>"
+        
+        # Use insertHtml instead of append
         cursor = self.chat_display.textCursor()
         cursor.movePosition(QTextCursor.End)
-
-        # Record the start position
-        start_pos = cursor.position()
-
-        # Convert markdown to HTML for assistant messages
-        if sender == "Assistant":
-            formatted_message = mdizer.markdown_to_html(message)
-        else:
-            formatted_message = message
-
-        cursor.insertHtml(f"<b>{sender}:</b> {formatted_message}<br><br>")
-
-        # Record the end position
+        cursor.insertHtml(full_message)
+        
+        # Record the start and end positions for editing
         end_pos = cursor.position()
-
+        start_pos = end_pos - len(full_message)
         self.message_positions.append((start_pos, end_pos))
+        
+        # Ensure the latest message is visible
+        self.chat_display.ensureCursorVisible()
 
-        self.chat_display.moveCursor(QTextCursor.End)
+    def escape_html(self, text):
+        """
+        Escapes HTML special characters in text.
+
+        Args:
+            text (str): The text to escape.
+
+        Returns:
+            str: The escaped text.
+        """
+        return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
     def show_chat_context_menu(self, position):
         """
@@ -400,10 +447,11 @@ class ChatWindow(QMainWindow):
 
             # Open a dialog to edit the message
             edit_dialog = QDialog(self)
+            edit_dialog.setWindowTitle('Edit Message')
             layout = QVBoxLayout(edit_dialog)
 
-            content_input = QTextEdit(edit_dialog)
-            content_input.setPlainText(content)
+            content_input = QLineEdit(edit_dialog)
+            content_input.setText(content)
             layout.addWidget(content_input)
 
             # OK and Cancel buttons
@@ -415,7 +463,7 @@ class ChatWindow(QMainWindow):
             layout.addLayout(button_layout)
 
             def accept():
-                new_content = content_input.toPlainText().strip()
+                new_content = content_input.text().strip()
                 if new_content:
                     self.edit_message(index, new_content)
                     edit_dialog.accept()
@@ -429,7 +477,6 @@ class ChatWindow(QMainWindow):
             cancel_button.clicked.connect(reject)
 
             edit_dialog.setLayout(layout)
-            edit_dialog.setWindowTitle('Edit Message')
             edit_dialog.exec_()
         else:
             self.chat_display.append("<b>Error:</b> Invalid message index.")
@@ -450,21 +497,12 @@ class ChatWindow(QMainWindow):
                 message = self.message_history[i]
                 sender = "You" if message['role'] == 'user' else "Assistant"
                 content = message['content']
-                is_html = message['role'] == 'assistant'
-                self.display_message(sender, content, is_html=is_html)
+                self.display_message(sender, content)  # Markdown handled internally
             # If the edited message is from the user, re-send API call
             if self.message_history[index]['role'] == 'user':
                 self.start_api_call()
         else:
             self.chat_display.append("<b>Error:</b> Invalid message index.")
-
-    def copy_message_to_clipboard(self, message):
-        """
-        Copies a message to the clipboard.
-        """
-        clipboard = QApplication.clipboard()
-        clipboard.setText(message)
-        QMessageBox.information(self, "Copied", "Your last message has been copied to the clipboard.")
 
     def show_model_list(self):
         """
@@ -474,18 +512,30 @@ class ChatWindow(QMainWindow):
         self.model_list_window.model_selected.connect(self.select_model)
         self.model_list_window.show()
 
-    def select_model(self, model_name, model_id):
+    def select_model(self, model_name, model_id, context_length, max_completion_tokens):
         """
-        Selects the model in the combo box based on the emitted model name and ID.
+        Selects the model based on the emitted data from ModelListWindow.
         """
-        # Find the index of the model in the combo box using the ID
-        for i in range(self.model_combo.count()):
-            if self.model_id_map.get(self.model_combo.itemText(i)) == model_id:
-                self.model_combo.setCurrentIndex(i)
-                QMessageBox.information(self, "Model Selected", f"Model '{model_name}' has been selected.")
-                return
-        
-        QMessageBox.warning(self, "Model Selection Error", f"Model '{model_name}' not found in the list.")
+        self.model_name = model_name
+        self.model_id = model_id
+        self.context_length = context_length
+        self.max_completion_tokens = max_completion_tokens
+
+        # Update the combo box
+        index = self.model_combo.findText(model_name)
+        if index >= 0:
+            self.model_combo.setCurrentIndex(index)
+        else:
+            QMessageBox.warning(self, "Model Selection Error", f"Model '{model_name}' not found in the list.")
+
+        # Display model information
+        info_message = (f"Model '{model_name}' selected.\n"
+                        f"Context Length: {context_length}\n"
+                        f"Max Completion Tokens: {max_completion_tokens}")
+        QMessageBox.information(self, "Model Selected", info_message)
+
+        # You can add additional logic here to handle the new information
+        # For example, updating UI elements or adjusting application behavior based on context_length
 
 def main():
     """

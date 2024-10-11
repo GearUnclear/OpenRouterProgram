@@ -39,7 +39,7 @@ class PreferencesWindow(QDialog):
         self.parent.savePreferences()
 
 class ModelListWindow(QDialog):
-    model_selected = pyqtSignal(str, str)  # Signal to emit both model name and ID
+    model_selected = pyqtSignal(str, str, int, int)  # Signal to emit model name, ID, context_length, and max_completion_tokens
 
     def format_pricing(self, pricing_dict):
         """
@@ -66,7 +66,7 @@ class ModelListWindow(QDialog):
         if self.models:
             self.columns = self.get_columns_from_models(self.models)
         else:
-            self.columns = ["id", "name", "created", "description"]  # default columns
+            self.columns = ["id", "name", "created", "description", "context_length", "max_completion_tokens"]  # default columns
         self.initUI()
         if self.models:
             self.populate_table(self.models)
@@ -80,6 +80,10 @@ class ModelListWindow(QDialog):
         columns_set = set()
         for model in models:
             columns_set.update(model.keys())
+            # Add top_provider fields
+            if 'top_provider' in model:
+                columns_set.add('context_length')
+                columns_set.add('max_completion_tokens')
         columns = list(columns_set)
         columns.sort()  # optional: sort the columns
         return columns
@@ -178,14 +182,18 @@ class ModelListWindow(QDialog):
 
     def populate_table(self, models):
         """
-        Populates the table with model data.
+        Populates the table with model data, including context_length and max_completion_tokens.
         """
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(models))
 
         for row, model in enumerate(models):
             for col_index, column in enumerate(self.columns):
-                value = model.get(column, 'N/A')
+                if column in ['context_length', 'max_completion_tokens']:
+                    top_provider = model.get('top_provider', {})
+                    value = top_provider.get(column, 'N/A')
+                else:
+                    value = model.get(column, 'N/A')
 
                 # Special handling for 'created' field
                 if column == 'created':
@@ -205,6 +213,14 @@ class ModelListWindow(QDialog):
                     if isinstance(pricing_dict, dict):
                         value = self.format_pricing(pricing_dict)
                     else:
+                        value = 'N/A'
+
+                # Format context_length
+                elif column == 'context_length':
+                    try:
+                        int_value = int(value)
+                        value = f"{int_value // 1000}K"
+                    except (ValueError, TypeError):
                         value = 'N/A'
 
                 elif isinstance(value, dict) or isinstance(value, list):
@@ -268,11 +284,27 @@ class ModelListWindow(QDialog):
 
     def on_model_double_clicked(self, row, column):
         """
-        Emits the model name and ID when a row is double-clicked and closes the window.
+        Emits the model name, ID, context_length, and max_completion_tokens when a row is double-clicked and closes the window.
         """
         model_name = self.table.item(row, self.columns.index("name")).text()
         model_id = self.table.item(row, self.columns.index("id")).text()
-        self.model_selected.emit(model_name, model_id)
+        
+        # Convert context_length to int, defaulting to 0 if not a valid number
+        context_length_str = self.table.item(row, self.columns.index("context_length")).text()
+        try:
+            # Remove 'K' if present and multiply by 1000
+            context_length = int(context_length_str.replace('K', '')) * 1000
+        except ValueError:
+            context_length = 0
+
+        # Convert max_completion_tokens to int, defaulting to 0 if not a valid number
+        max_completion_tokens_str = self.table.item(row, self.columns.index("max_completion_tokens")).text()
+        try:
+            max_completion_tokens = int(max_completion_tokens_str)
+        except ValueError:
+            max_completion_tokens = 0
+        
+        self.model_selected.emit(model_name, model_id, context_length, max_completion_tokens)
         self.close()  # Close the window after emitting the signal
 
 if __name__ == "__main__":
