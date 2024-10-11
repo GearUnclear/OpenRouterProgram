@@ -5,7 +5,7 @@ import json
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QTextBrowser, QPushButton, QSpinBox, QMessageBox,
-    QLineEdit, QMenu, QAction, QDialog, QMenuBar, QProgressBar
+    QLineEdit, QMenu, QAction, QDialog, QMenuBar, QProgressBar, QTextEdit
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QTextCursor
@@ -442,7 +442,7 @@ class ChatWindow(QMainWindow):
             edit_dialog.setWindowTitle('Edit Message')
             layout = QVBoxLayout(edit_dialog)
 
-            content_input = QLineEdit(edit_dialog)
+            content_input = QTextEdit(edit_dialog)  # Changed from QLineEdit to QTextEdit
             content_input.setText(content)
             layout.addWidget(content_input)
 
@@ -455,7 +455,7 @@ class ChatWindow(QMainWindow):
             layout.addLayout(button_layout)
 
             def accept():
-                new_content = content_input.text().strip()
+                new_content = content_input.toPlainText().strip()
                 if new_content:
                     self.edit_message(index, new_content)
                     edit_dialog.accept()

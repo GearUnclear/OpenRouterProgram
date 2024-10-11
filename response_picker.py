@@ -16,6 +16,7 @@ class ChoiceWidget(QWidget):
     """
     def __init__(self, text, index, parent=None):
         super().__init__(parent)
+        self.markdown_text = text  # Store the original Markdown text
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
 
@@ -23,7 +24,7 @@ class ChoiceWidget(QWidget):
         self.label = QTextBrowser()  # Use QTextBrowser for better HTML rendering
         
         # Convert markdown to HTML
-        html_content = mdizer.markdown_to_html(text)
+        html_content = mdizer.markdown_to_html(self.markdown_text)
         self.label.setHtml(f"<div style='max-width: 350px; word-wrap: break-word;'>{html_content}</div>")
         
         self.label.setReadOnly(True)
@@ -177,8 +178,8 @@ class ResponsePicker(QDialog):
             # No selection made
             return
         selected_widget = self.choice_widgets[selected_id]
-        # Get the HTML content instead of plain text
-        self.selected_content = selected_widget.label.toHtml()
+        # Retrieve the original Markdown content
+        self.selected_content = selected_widget.markdown_text
         self.accept()
 
     def get_selected_content(self):

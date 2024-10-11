@@ -169,7 +169,7 @@ class ModelListWindow(QDialog):
                 QMessageBox.warning(self, "Warning", f"No models found in the JSON file at {file_path}.")
                 return None
             else:
-                QMessageBox.information(self, "Success", f"Data loaded from {file_path}")
+#                QMessageBox.information(self, "Success", f"Data loaded from {file_path}")
                 return models
         except json.JSONDecodeError as jde:
             QMessageBox.warning(self, "JSON Decode Error", f"Failed to parse JSON file: {str(jde)}")
