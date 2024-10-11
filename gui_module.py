@@ -13,6 +13,8 @@ from PyQt5.QtGui import QTextCursor
 from api_module import get_api_key, make_api_request
 import mdizer
 from response_picker import ResponsePicker
+import json
+from model_list import ModelListWindow
 
 # List of models
 MODELS = [
@@ -98,6 +100,16 @@ class ChatWindow(QMainWindow):
         main_widget = QWidget()
         main_layout = QVBoxLayout()
 
+        # Load models from the JSON file
+        try:
+            with open(r'C:\Code - Copy\FlyAway-pyrq\__PYDATA\models_jason\models_data.json', 'r') as f:
+                model_data = json.load(f)
+            MODELS = [model['name'] for model in model_data['data']]
+        except Exception as e:
+            QMessageBox.critical(self, "Model Load Error", f"Failed to load models: {str(e)}")
+            self.close()
+            return
+
         # Model selection
         model_layout = QHBoxLayout()
         model_label = QLabel("Select Model:")
@@ -148,6 +160,11 @@ class ChatWindow(QMainWindow):
         progress_layout.addWidget(self.progress_bar)
         main_layout.addLayout(progress_layout)
 
+        # Add a button to open the model list window
+        model_list_button = QPushButton("Show Model List")
+        model_list_button.clicked.connect(self.show_model_list)
+        main_layout.addWidget(model_list_button)
+
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
 
@@ -165,6 +182,10 @@ class ChatWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "API Key Error", str(e))
             self.close()
+
+        # At the beginning of the class, after loading the model data:
+        self.model_data = model_data['data']
+        self.model_id_map = {model['name']: model['id'] for model in self.model_data}
 
     def update_progress(self, chunks_received):
         """
@@ -210,10 +231,15 @@ class ChatWindow(QMainWindow):
         Initiates the API call in a separate thread.
         """
         self.model_name = self.model_combo.currentText()
+        model_id = self.model_id_map.get(self.model_name)
+        if not model_id:
+            QMessageBox.warning(self, "Model Error", f"Could not find ID for model: {self.model_name}")
+            return
+
         num_choices = self.choices_spin.value()
 
         # Define the temperature values
-        all_temperatures = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        all_temperatures = [0.5, 0.6, 0.7, 1.0, 1.1, 1.25]
         temperature_values = all_temperatures[:num_choices]  # Adjust based on num_choices
 
         print(f"Number of choices: {num_choices}, Temperatures: {temperature_values}")  # Debug statement
@@ -231,7 +257,7 @@ class ChatWindow(QMainWindow):
         self.thread = APICallThread(
             api_key=self.api_key,
             message_history=self.message_history,
-            model=self.model_name,
+            model=model_id,  # Use the model ID instead of the name
             temperature_values=temperature_values,
             num_choices=num_choices
         )
@@ -258,7 +284,7 @@ class ChatWindow(QMainWindow):
             # Only one choice, continue the chat
             content = choices[0]["message"]["content"].strip()
             self.message_history.append({"role": "assistant", "content": content})
-            self.display_message("Assistant", content, is_html=True)
+            self.display_message("Assistant", content)
         else:
             # Multiple choices, use the ResponsePicker
             response_picker = ResponsePicker(self, choices)
@@ -266,7 +292,7 @@ class ChatWindow(QMainWindow):
                 selected_content = response_picker.get_selected_content()
                 if selected_content:
                     self.message_history.append({"role": "assistant", "content": selected_content})
-                    self.display_message("Assistant", selected_content, is_html=True)
+                    self.display_message("Assistant", selected_content)
             else:
                 QMessageBox.warning(self, "Selection Cancelled", "No response was selected.")
 
@@ -325,8 +351,13 @@ class ChatWindow(QMainWindow):
         # Record the start position
         start_pos = cursor.position()
 
-        formatted_message = mdizer.markdown_to_html(message) if is_html else message
-        cursor.insertHtml(f"<b>{sender}:</b> {formatted_message}<br>")
+        # Convert markdown to HTML for assistant messages
+        if sender == "Assistant":
+            formatted_message = mdizer.markdown_to_html(message)
+        else:
+            formatted_message = message
+
+        cursor.insertHtml(f"<b>{sender}:</b> {formatted_message}<br><br>")
 
         # Record the end position
         end_pos = cursor.position()
@@ -434,6 +465,27 @@ class ChatWindow(QMainWindow):
         clipboard = QApplication.clipboard()
         clipboard.setText(message)
         QMessageBox.information(self, "Copied", "Your last message has been copied to the clipboard.")
+
+    def show_model_list(self):
+        """
+        Opens the model list window and connects the model selection signal.
+        """
+        self.model_list_window = ModelListWindow()
+        self.model_list_window.model_selected.connect(self.select_model)
+        self.model_list_window.show()
+
+    def select_model(self, model_name, model_id):
+        """
+        Selects the model in the combo box based on the emitted model name and ID.
+        """
+        # Find the index of the model in the combo box using the ID
+        for i in range(self.model_combo.count()):
+            if self.model_id_map.get(self.model_combo.itemText(i)) == model_id:
+                self.model_combo.setCurrentIndex(i)
+                QMessageBox.information(self, "Model Selected", f"Model '{model_name}' has been selected.")
+                return
+        
+        QMessageBox.warning(self, "Model Selection Error", f"Model '{model_name}' not found in the list.")
 
 def main():
     """
