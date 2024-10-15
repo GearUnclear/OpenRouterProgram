@@ -5,7 +5,8 @@ import json
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QTextBrowser, QPushButton, QSpinBox, QMessageBox,
-    QLineEdit, QMenu, QAction, QDialog, QMenuBar, QProgressBar, QTextEdit
+    QLineEdit, QMenu, QAction, QDialog, QMenuBar, QProgressBar, QTextEdit,
+    QSlider
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QTextCursor
@@ -166,6 +167,34 @@ class ChatWindow(QMainWindow):
         model_list_button.clicked.connect(self.show_model_list)
         main_layout.addWidget(model_list_button)
 
+        # Context Length Slider
+        context_length_layout = QHBoxLayout()
+        context_length_label = QLabel("Context Length:")
+        self.context_length_slider = QSlider(Qt.Horizontal)
+        self.context_length_slider.setMinimum(0)
+        self.context_length_slider.setMaximum(1000000)  # Default max
+        self.context_length_slider.setValue(self.context_length)
+        self.context_length_slider.valueChanged.connect(self.update_context_length_label)
+        self.context_length_value_label = QLabel(str(self.context_length))
+        context_length_layout.addWidget(context_length_label)
+        context_length_layout.addWidget(self.context_length_slider)
+        context_length_layout.addWidget(self.context_length_value_label)
+        main_layout.addLayout(context_length_layout)
+
+        # Max Completion Tokens Slider
+        max_tokens_layout = QHBoxLayout()
+        max_tokens_label = QLabel("Max Completion Tokens:")
+        self.max_tokens_slider = QSlider(Qt.Horizontal)
+        self.max_tokens_slider.setMinimum(0)
+        self.max_tokens_slider.setMaximum(8192)  # Default max
+        self.max_tokens_slider.setValue(self.max_completion_tokens)
+        self.max_tokens_slider.valueChanged.connect(self.update_max_tokens_label)
+        self.max_tokens_value_label = QLabel(str(self.max_completion_tokens))
+        max_tokens_layout.addWidget(max_tokens_label)
+        max_tokens_layout.addWidget(self.max_tokens_slider)
+        max_tokens_layout.addWidget(self.max_tokens_value_label)
+        main_layout.addLayout(max_tokens_layout)
+
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
 
@@ -282,9 +311,9 @@ class ChatWindow(QMainWindow):
             model=model_id,
             temperature_values=temperature_values,
             num_choices=num_choices,
-            context_length=context_length,
-            max_completion_tokens=max_completion_tokens,
-            parent=self  # Pass reference to extract_text_from_html
+            context_length=self.context_length,
+            max_completion_tokens=self.max_completion_tokens,
+            parent=self
         )
         self.thread.response_ready.connect(self.handle_responses)
         self.thread.no_responses.connect(self.handle_no_responses)
@@ -520,14 +549,29 @@ class ChatWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Model Selection Error", f"Model '{model_name}' not found in the list.")
 
+        # Update slider maximums and current values
+        self.context_length_slider.setMaximum(context_length)
+        self.context_length_slider.setValue(context_length)
+        self.max_tokens_slider.setMaximum(max_completion_tokens)
+        self.max_tokens_slider.setValue(max_completion_tokens)
+
+        # Update labels
+        self.update_context_length_label(context_length)
+        self.update_max_tokens_label(max_completion_tokens)
+
         # Display model information
         info_message = (f"Model '{model_name}' selected.\n"
                         f"Context Length: {context_length}\n"
                         f"Max Completion Tokens: {max_completion_tokens}")
         QMessageBox.information(self, "Model Selected", info_message)
 
-        # You can add additional logic here to handle the new information
-        # For example, updating UI elements or adjusting application behavior based on context_length
+    def update_context_length_label(self, value):
+        self.context_length = min(value, self.context_length_slider.maximum())
+        self.context_length_value_label.setText(str(self.context_length))
+
+    def update_max_tokens_label(self, value):
+        self.max_completion_tokens = min(value, self.max_tokens_slider.maximum())
+        self.max_tokens_value_label.setText(str(self.max_completion_tokens))
 
 def main():
     """
