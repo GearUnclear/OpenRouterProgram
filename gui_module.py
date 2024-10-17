@@ -61,10 +61,11 @@ class APICallThread(QThread):
                     self.progress_update.emit(1)  # Emit one chunk received
 
                 # After the full response is received
-                # Extract plain text from HTML
-                plain_text = self.parent.extract_text_from_html(response_text)
+                # Do not strip HTML tags
+                # plain_text = self.parent.extract_text_from_html(response_text)
 
-                choice = {'message': {'content': plain_text}}
+                # Directly use the response_text
+                choice = {'message': {'content': response_text}}
                 choices.append(choice)
         except Exception as e:
             # Log the exception if needed
