@@ -61,10 +61,6 @@ class APICallThread(QThread):
                     self.progress_update.emit(1)  # Emit one chunk received
 
                 # After the full response is received
-                # Do not strip HTML tags
-                # plain_text = self.parent.extract_text_from_html(response_text)
-
-                # Directly use the response_text
                 choice = {'message': {'content': response_text}}
                 choices.append(choice)
         except Exception as e:
@@ -106,7 +102,9 @@ class ChatWindow(QMainWindow):
         try:
             with open(r'C:\Code - Copy\FlyAway-pyrq\__PYDATA\models_jason\models_data.json', 'r') as f:
                 model_data = json.load(f)
-            MODELS = [model['name'] for model in model_data['data']]
+            self.model_data = model_data['data']
+            self.model_id_map = {model['name']: model['id'] for model in self.model_data}
+            models_list = [model['name'] for model in self.model_data]  # Create list of model names
         except Exception as e:
             QMessageBox.critical(self, "Model Load Error", f"Failed to load models: {str(e)}")
             self.close()
@@ -116,7 +114,7 @@ class ChatWindow(QMainWindow):
         model_layout = QHBoxLayout()
         model_label = QLabel("Select Model:")
         self.model_combo = QComboBox()
-        self.model_combo.addItems(MODELS)
+        self.model_combo.addItems(models_list)  # Use the loaded models_list instead of MODELS
         model_layout.addWidget(model_label)
         model_layout.addWidget(self.model_combo)
         main_layout.addLayout(model_layout)
@@ -195,6 +193,24 @@ class ChatWindow(QMainWindow):
         max_tokens_layout.addWidget(self.max_tokens_slider)
         max_tokens_layout.addWidget(self.max_tokens_value_label)
         main_layout.addLayout(max_tokens_layout)
+
+        # Temperature Slider
+        self.temp_layout = QHBoxLayout()
+        temp_label = QLabel("Temperature:")
+        self.temp_slider = QSlider(Qt.Horizontal)
+        self.temp_slider.setMinimum(50)  # 0.5
+        self.temp_slider.setMaximum(125) # 1.25
+        self.temp_slider.setValue(70)     # 0.7 default
+        self.temp_slider.valueChanged.connect(self.update_temp_label)
+        self.temp_value_label = QLabel("0.7")
+        self.temp_layout.addWidget(temp_label)
+        self.temp_layout.addWidget(self.temp_slider)
+        self.temp_layout.addWidget(self.temp_value_label)
+        main_layout.addLayout(self.temp_layout)
+
+        # Connect choices spin box to control temperature slider visibility
+        self.choices_spin.valueChanged.connect(self.update_temp_slider_visibility)
+        self.update_temp_slider_visibility(1)  # Initial state
 
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
@@ -286,9 +302,12 @@ class ChatWindow(QMainWindow):
 
         num_choices = self.choices_spin.value()
 
-        # Define the temperature values
-        all_temperatures = [0.5, 0.6, 0.7, 1.0, 1.1, 1.25]
-        temperature_values = all_temperatures[:num_choices]  # Adjust based on num_choices
+        # Define temperature values based on number of choices
+        if num_choices == 1:
+            temperature_values = [self.temp_slider.value() / 100]
+        else:
+            all_temperatures = [0.5, 0.6, 0.7, 1.0, 1.1, 1.25]
+            temperature_values = all_temperatures[:num_choices]
 
         print(f"Number of choices: {num_choices}, Temperatures: {temperature_values}")  # Debug statement
 
@@ -528,10 +547,11 @@ class ChatWindow(QMainWindow):
 
     def show_model_list(self):
         """
-        Opens the model list window and connects the model selection signal.
+        Opens the model list window and connects the model selection and update signals.
         """
         self.model_list_window = ModelListWindow()
         self.model_list_window.model_selected.connect(self.select_model)
+        self.model_list_window.models_updated.connect(self.reload_models)  # **New: Connect the models_updated signal**
         self.model_list_window.show()
 
     def select_model(self, model_name, model_id, context_length, max_completion_tokens):
@@ -573,6 +593,75 @@ class ChatWindow(QMainWindow):
     def update_max_tokens_label(self, value):
         self.max_completion_tokens = min(value, self.max_tokens_slider.maximum())
         self.max_tokens_value_label.setText(str(self.max_completion_tokens))
+
+    def load_models(self):
+        """
+        Loads the model list from the JSON file and initializes model-related attributes.
+        """
+        try:
+            with open(r'C:\Code - Copy\FlyAway-pyrq\__PYDATA\models_jason\models_data.json', 'r') as f:
+                model_data = json.load(f)
+            MODELS = [model['name'] for model in model_data['data']]
+        except Exception as e:
+            QMessageBox.critical(self, "Model Load Error", f"Failed to load models: {str(e)}")
+            self.close()
+            return
+
+        # Initialize model_data and model_id_map
+        self.model_data = model_data['data']
+        self.model_id_map = {model['name']: model['id'] for model in self.model_data}
+
+        # Populate the model_combo if it exists
+        try:
+            self.model_combo.clear()
+            self.model_combo.addItems(MODELS)
+        except AttributeError:
+            pass  # model_combo not yet initialized
+
+    def reload_models(self):
+        """
+        Reloads the model list from the JSON file and updates the model combo box.
+        """
+        try:
+            with open(r'C:\Code - Copy\FlyAway-pyrq\__PYDATA\models_jason\models_data.json', 'r') as f:
+                model_data = json.load(f)
+                
+            # Update model_data and model_id_map
+            self.model_data = model_data['data']
+            self.model_id_map = {model['name']: model['id'] for model in self.model_data}
+            models_list = [model['name'] for model in self.model_data]
+
+            # Update the model_combo
+            current_model = self.model_combo.currentText()
+            self.model_combo.blockSignals(True)  # Prevent triggering selection changes
+            self.model_combo.clear()
+            self.model_combo.addItems(models_list)  # Add the new models
+            
+            # Try to restore the previously selected model
+            if current_model in models_list:
+                index = self.model_combo.findText(current_model)
+                self.model_combo.setCurrentIndex(index)
+            else:
+                self.model_combo.setCurrentIndex(0)  # Select the first model by default
+            
+            self.model_combo.blockSignals(False)
+
+            QMessageBox.information(self, "Models Updated", "The model list has been updated with the latest models.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Model Reload Error", f"Failed to reload models: {str(e)}")
+            return
+
+    def update_temp_label(self, value):
+        """Updates the temperature label with the actual value (divided by 100)."""
+        temp = value / 100
+        self.temp_value_label.setText(f"{temp:.2f}")
+
+    def update_temp_slider_visibility(self, num_choices):
+        """Shows/hides temperature controls based on number of choices."""
+        show = (num_choices == 1)
+        for widget in (self.temp_layout.itemAt(i).widget() for i in range(self.temp_layout.count())):
+            widget.setVisible(show)
 
 def main():
     """

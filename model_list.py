@@ -39,7 +39,8 @@ class PreferencesWindow(QDialog):
         self.parent.savePreferences()
 
 class ModelListWindow(QDialog):
-    model_selected = pyqtSignal(str, str, int, int)  # Signal to emit model name, ID, context_length, and max_completion_tokens
+    model_selected = pyqtSignal(str, str, int, int)  # Existing signal
+    models_updated = pyqtSignal()  # New Signal to Notify Updates
 
     def format_pricing(self, pricing_dict):
         """
@@ -50,7 +51,6 @@ class ModelListWindow(QDialog):
             try:
                 price_per_token = float(value)
                 # Convert to $ per million tokens
-                # According to your mapping where 0.000001 = $1
                 price_per_million = price_per_token / 0.000001 * 1
                 pricing_parts.append(f"{key}: ${price_per_million:.2f}/M tokens")
             except ValueError:
@@ -169,7 +169,8 @@ class ModelListWindow(QDialog):
                 QMessageBox.warning(self, "Warning", f"No models found in the JSON file at {file_path}.")
                 return None
             else:
-#                QMessageBox.information(self, "Success", f"Data loaded from {file_path}")
+                # Emit the models_updated Signal After Successfully Loading Models
+                self.models_updated.emit()
                 return models
         except json.JSONDecodeError as jde:
             QMessageBox.warning(self, "JSON Decode Error", f"Failed to parse JSON file: {str(jde)}")
@@ -209,7 +210,7 @@ class ModelListWindow(QDialog):
 
                 # Special handling for 'pricing' field
                 elif column == 'pricing':
-                    pricing_dict = value  # Should be a dict
+                    pricing_dict = value
                     if isinstance(pricing_dict, dict):
                         value = self.format_pricing(pricing_dict)
                     else:
@@ -224,7 +225,7 @@ class ModelListWindow(QDialog):
                         value = 'N/A'
 
                 elif isinstance(value, dict) or isinstance(value, list):
-                    value = json.dumps(value, indent=2)  # Pretty-print for readability
+                    value = json.dumps(value, indent=2)
 
                 item = QTableWidgetItem(str(value))
                 item.setFlags(item.flags() ^ Qt.ItemIsEditable)
@@ -247,7 +248,7 @@ class ModelListWindow(QDialog):
 
                 # Save to JSON file
                 file_path = r'C:\Code - Copy\FlyAway-pyrq\__PYDATA\models_jason\models_data.json'
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)  # Ensure the directory exists
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 with open(file_path, 'w') as f:
                     json.dump(data, f, indent=4)
 
@@ -256,6 +257,7 @@ class ModelListWindow(QDialog):
                     models = data.get('data', [])
                     if not models:
                         QMessageBox.warning(self, "Warning", "No models found under 'data' key in the API response.")
+                        return
                 elif isinstance(data, list):
                     models = data
                 else:
@@ -263,12 +265,23 @@ class ModelListWindow(QDialog):
 
                 if not models:
                     QMessageBox.warning(self, "Warning", "No models found in the API response.")
-                else:
-                    self.models = models
-                    self.columns = self.get_columns_from_models(self.models)
-                    self.initUI()  # Re-initialize UI to update columns
-                    self.populate_table(models)
-                    QMessageBox.information(self, "Success", f"Data successfully saved to {file_path}")
+                    return
+
+                # Update models and columns
+                self.models = models
+                self.columns = self.get_columns_from_models(self.models)
+                
+                # Update table columns
+                self.table.setColumnCount(len(self.columns))
+                self.table.setHorizontalHeaderLabels(self.columns)
+                
+                # Populate the table with new data
+                self.populate_table(models)
+                
+                QMessageBox.information(self, "Success", f"Data successfully saved to {file_path}")
+                # Emit the models_updated signal only once after everything is done
+                self.models_updated.emit()
+                
             else:
                 QMessageBox.critical(
                     self,
