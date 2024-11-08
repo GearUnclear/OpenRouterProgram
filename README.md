@@ -16,7 +16,7 @@ Welcome to the **OpenRouter Chat Interface**! ✨ This charming little app is yo
 
 1. **Clone the repo to your cozy workspace:**
    ```bash
-   git clone https://github.com/yourusername/openrouter-chat-interface.git
+   git clone https://github.com/GearUnclear/OpenRouterProgram.git
    ```
 2. **Hop into the project directory:**
    ```bash
