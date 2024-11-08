@@ -1,7 +1,3 @@
-Here's a more cutesy and friendly version of your README:
-
----
-
 # 🌟 OpenRouter Chat Interface 🌟
 
 Welcome to the **OpenRouter Chat Interface**! ✨ This charming little app is your new best friend for chatting with AI models through the OpenRouter API. Whether you're here to have fun conversations, explore different models, or just play around, we've got you covered! 🐾
