@@ -27,7 +27,7 @@ def get_api_key(credential_name: str) -> str:
     except Exception as e:
         raise Exception(f"Error retrieving API key: {e}")
 
-def make_api_request(api_key: str, message_history: list, model: str, temperature: float = 1.0, stream: bool = False, context_length: int = None, max_completion_tokens: int = None):
+def make_api_request(api_key: str, message_history: list, model: str, temperature: float = 1.0, stream: bool = False, context_length: int | None = None, max_completion_tokens: int | None = None, reasoning_effort: str | None = None, reasoning_max_tokens: int | None = None, exclude_reasoning: bool = False):
     """
     Make a POST request to the OpenRouter API for a specific model.
 
@@ -39,6 +39,9 @@ def make_api_request(api_key: str, message_history: list, model: str, temperatur
         stream (bool, optional): Whether to stream the response in chunks.
         context_length (int, optional): The maximum number of tokens for context. Defaults to None.
         max_completion_tokens (int, optional): The maximum number of tokens for the completion. Defaults to None.
+        reasoning_effort (str, optional): The reasoning effort level ("high", "medium", "low"). Defaults to None.
+        reasoning_max_tokens (int, optional): The maximum tokens for reasoning. Defaults to None.
+        exclude_reasoning (bool, optional): Whether to exclude reasoning tokens from response. Defaults to False.
 
     Yields:
         str: The content chunk from the AI response.
@@ -66,6 +69,16 @@ def make_api_request(api_key: str, message_history: list, model: str, temperatur
         payload["max_tokens"] = context_length
     if max_completion_tokens is not None:
         payload["max_completion_tokens"] = max_completion_tokens
+    
+    # Add reasoning parameters if needed
+    if reasoning_effort is not None or reasoning_max_tokens is not None or exclude_reasoning:
+        payload["reasoning"] = {}
+        if reasoning_effort:
+            payload["reasoning"]["effort"] = reasoning_effort
+        if reasoning_max_tokens:
+            payload["reasoning"]["max_tokens"] = reasoning_max_tokens
+        if exclude_reasoning:
+            payload["reasoning"]["exclude"] = True
 
     try:
         with requests.post(url, headers=headers, json=payload, stream=stream) as response:

@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QTextBrowser, QPushButton, QSpinBox, QMessageBox,
     QLineEdit, QMenu, QAction, QDialog, QMenuBar, QProgressBar, QTextEdit,
-    QSlider
+    QSlider, QCheckBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QTextCursor
@@ -28,7 +28,7 @@ class APICallThread(QThread):
     no_responses = pyqtSignal()            # Emits if no responses are received
     progress_update = pyqtSignal(int)      # Emits the number of chunks received for progress bar
 
-    def __init__(self, api_key, message_history, model, temperature_values, num_choices=1, context_length=None, max_completion_tokens=None, parent=None):
+    def __init__(self, api_key, message_history, model, temperature_values, num_choices=1, context_length=None, max_completion_tokens=None, reasoning_effort=None, reasoning_max_tokens=None, exclude_reasoning=False, parent=None):
         super().__init__(parent)
         self.api_key = api_key
         self.message_history = message_history.copy()
@@ -37,7 +37,10 @@ class APICallThread(QThread):
         self.num_choices = num_choices
         self.context_length = context_length
         self.max_completion_tokens = max_completion_tokens
-        self.parent = parent  # Reference to the main window for HTML extraction
+        self.reasoning_effort = reasoning_effort
+        self.reasoning_max_tokens = reasoning_max_tokens
+        self.exclude_reasoning = exclude_reasoning
+        self.parent_window = parent  # Reference to the main window for HTML extraction
 
     def run(self):
         choices = []
@@ -55,7 +58,10 @@ class APICallThread(QThread):
                     temperature=temperature,
                     stream=True,
                     context_length=self.context_length,
-                    max_completion_tokens=self.max_completion_tokens
+                    max_completion_tokens=self.max_completion_tokens,
+                    reasoning_effort=self.reasoning_effort,
+                    reasoning_max_tokens=self.reasoning_max_tokens,
+                    exclude_reasoning=self.exclude_reasoning
                 ):
                     response_text += chunk
                     self.progress_update.emit(1)  # Emit one chunk received
@@ -185,7 +191,7 @@ class ChatWindow(QMainWindow):
         max_tokens_label = QLabel("Max Completion Tokens:")
         self.max_tokens_slider = QSlider(Qt.Horizontal)
         self.max_tokens_slider.setMinimum(0)
-        self.max_tokens_slider.setMaximum(8192)  # Default max
+        self.max_tokens_slider.setMaximum(256000)  # Default max
         self.max_tokens_slider.setValue(self.max_completion_tokens)
         self.max_tokens_slider.valueChanged.connect(self.update_max_tokens_label)
         self.max_tokens_value_label = QLabel(str(self.max_completion_tokens))
@@ -207,6 +213,48 @@ class ChatWindow(QMainWindow):
         self.temp_layout.addWidget(self.temp_slider)
         self.temp_layout.addWidget(self.temp_value_label)
         main_layout.addLayout(self.temp_layout)
+
+        # Reasoning Controls
+        # First, group box to organize and frame the reasoning controls
+        reasoning_group = QWidget()
+        reasoning_layout = QVBoxLayout(reasoning_group)
+        reasoning_title = QLabel("<b>Reasoning Token Controls</b>")
+        reasoning_layout.addWidget(reasoning_title)
+        
+        # Reasoning Effort ComboBox
+        reasoning_effort_layout = QHBoxLayout()
+        reasoning_effort_label = QLabel("Reasoning Effort:")
+        self.reasoning_effort_combo = QComboBox()
+        self.reasoning_effort_combo.addItems(["None", "Low", "Medium", "High"])
+        self.reasoning_effort_combo.setCurrentIndex(0)  # "None" selected by default
+        self.reasoning_effort_combo.currentIndexChanged.connect(self.update_reasoning_controls)
+        reasoning_effort_layout.addWidget(reasoning_effort_label)
+        reasoning_effort_layout.addWidget(self.reasoning_effort_combo)
+        reasoning_layout.addLayout(reasoning_effort_layout)
+        
+        # Reasoning Max Tokens Slider
+        reasoning_max_tokens_layout = QHBoxLayout()
+        reasoning_max_tokens_label = QLabel("Max Tokens for Reasoning:")
+        self.reasoning_max_tokens_slider = QSlider(Qt.Horizontal)
+        self.reasoning_max_tokens_slider.setMinimum(0)
+        self.reasoning_max_tokens_slider.setMaximum(64000)  # Default max
+        self.reasoning_max_tokens_slider.setValue(0)
+        self.reasoning_max_tokens_slider.valueChanged.connect(self.update_reasoning_max_tokens_label)
+        self.reasoning_max_tokens_value_label = QLabel("0")
+        reasoning_max_tokens_layout.addWidget(reasoning_max_tokens_label)
+        reasoning_max_tokens_layout.addWidget(self.reasoning_max_tokens_slider)
+        reasoning_max_tokens_layout.addWidget(self.reasoning_max_tokens_value_label)
+        reasoning_layout.addLayout(reasoning_max_tokens_layout)
+        
+        # Exclude Reasoning Option
+        reasoning_exclude_layout = QHBoxLayout()
+        self.exclude_reasoning_checkbox = QCheckBox("Exclude Reasoning from Response")
+        self.exclude_reasoning_checkbox.setChecked(False)
+        reasoning_exclude_layout.addWidget(self.exclude_reasoning_checkbox)
+        reasoning_layout.addLayout(reasoning_exclude_layout)
+        
+        # Add the reasoning group to main layout
+        main_layout.addWidget(reasoning_group)
 
         # Connect choices spin box to control temperature slider visibility
         self.choices_spin.valueChanged.connect(self.update_temp_slider_visibility)
@@ -324,6 +372,31 @@ class ChatWindow(QMainWindow):
         # Use the stored context_length and max_completion_tokens if available
         context_length = self.context_length if self.context_length > 0 else None
         max_completion_tokens = self.max_completion_tokens if self.max_completion_tokens > 0 else None
+        
+        # Get reasoning parameters
+        reasoning_effort = None
+        reasoning_max_tokens = None
+        exclude_reasoning = False
+        
+        # Get reasoning effort if selected
+        effort_index = self.reasoning_effort_combo.currentIndex()
+        if effort_index > 0:  # If not "None"
+            if effort_index == 1:
+                reasoning_effort = "low"
+            elif effort_index == 2:
+                reasoning_effort = "medium"
+            elif effort_index == 3:
+                reasoning_effort = "high"
+        
+        # Get reasoning max tokens if set
+        reasoning_max_tokens_value = self.reasoning_max_tokens_slider.value()
+        if reasoning_max_tokens_value > 0:
+            reasoning_max_tokens = reasoning_max_tokens_value
+            
+        # Get exclude reasoning setting
+        exclude_reasoning = self.exclude_reasoning_checkbox.isChecked()
+        
+        print(f"Reasoning parameters - Effort: {reasoning_effort}, Max Tokens: {reasoning_max_tokens}, Exclude: {exclude_reasoning}")
 
         self.thread = APICallThread(
             api_key=self.api_key,
@@ -333,6 +406,9 @@ class ChatWindow(QMainWindow):
             num_choices=num_choices,
             context_length=self.context_length,
             max_completion_tokens=self.max_completion_tokens,
+            reasoning_effort=reasoning_effort,
+            reasoning_max_tokens=reasoning_max_tokens,
+            exclude_reasoning=exclude_reasoning,
             parent=self
         )
         self.thread.response_ready.connect(self.handle_responses)
@@ -355,17 +431,32 @@ class ChatWindow(QMainWindow):
         self.progress_label.setVisible(False)
 
         if len(choices) == 1:
-            content = choices[0]["message"]["content"].strip()
-            self.message_history.append({"role": "assistant", "content": content})
-            self.display_message("Assistant", content)
+            response = choices[0]["message"]
+            content = response.get("content", "").strip()
+            reasoning = response.get("reasoning", "")
+            
+            # Add the response to message history
+            message_data = {"role": "assistant", "content": content}
+            if reasoning:
+                message_data["reasoning"] = reasoning
+            self.message_history.append(message_data)
+            
+            # Display in the chat
+            self.display_message("Assistant", content, reasoning)
         else:
             response_picker = ResponsePicker(self, choices)
             if response_picker.exec_() == QDialog.Accepted:
                 selected_content = response_picker.get_selected_content()
+                selected_reasoning = response_picker.get_selected_reasoning()
                 if selected_content:
-                    # Directly use the markdown content without converting to plain text
-                    self.message_history.append({"role": "assistant", "content": selected_content})
-                    self.display_message("Assistant", selected_content)
+                    # Create message data for history
+                    message_data = {"role": "assistant", "content": selected_content}
+                    if selected_reasoning:
+                        message_data["reasoning"] = selected_reasoning
+                    self.message_history.append(message_data)
+                    
+                    # Display in chat
+                    self.display_message("Assistant", selected_content, selected_reasoning)
             else:
                 QMessageBox.warning(self, "Selection Cancelled", "No response was selected.")
 
@@ -414,20 +505,34 @@ class ChatWindow(QMainWindow):
         clipboard.setText(message)
         QMessageBox.information(self, "Copied", "Your message has been copied to the clipboard.")
 
-    def display_message(self, sender, message):
+    def display_message(self, sender, message, reasoning=None):
         """
         Displays a message in the chat window with proper markdown formatting.
         """
         if sender.lower() == "assistant":
             try:
                 formatted_message = mdizer.markdown_to_html(message)
+                if reasoning:
+                    formatted_reasoning = mdizer.markdown_to_html(reasoning)
+                else:
+                    formatted_reasoning = None
             except Exception as e:
                 formatted_message = self.escape_html(message)
+                formatted_reasoning = self.escape_html(reasoning) if reasoning else None
                 print(f"Markdown conversion failed: {e}")
         else:
             formatted_message = self.escape_html(message)
-
-        full_message = f"<b>{sender}:</b><br>{formatted_message}<br><br>"
+            formatted_reasoning = None
+        
+        # Start with sender and the main message
+        full_message = f"<b>{sender}:</b><br>{formatted_message}"
+        
+        # Add reasoning if it exists
+        if formatted_reasoning:
+            full_message += f"<br><br><details><summary><b>Reasoning</b></summary><div class='reasoning'>{formatted_reasoning}</div></details>"
+            
+        # Add final break
+        full_message += "<br><br>"
         
         # Use insertHtml instead of append
         cursor = self.chat_display.textCursor()
@@ -662,6 +767,34 @@ class ChatWindow(QMainWindow):
         show = (num_choices == 1)
         for widget in (self.temp_layout.itemAt(i).widget() for i in range(self.temp_layout.count())):
             widget.setVisible(show)
+
+    def update_reasoning_controls(self, index):
+        """
+        Updates the state of reasoning controls based on the selected effort level.
+        """
+        # Enable/disable max tokens slider based on selected effort
+        if index == 0:  # None
+            self.reasoning_max_tokens_slider.setEnabled(False)
+            self.reasoning_max_tokens_slider.setValue(0)
+            self.update_reasoning_max_tokens_label(0)
+        else:
+            self.reasoning_max_tokens_slider.setEnabled(True)
+            # Always update values based on effort level when changing
+            if index == 1:  # Low
+                self.reasoning_max_tokens_slider.setValue(1600)  # ~20% of 8000
+            elif index == 2:  # Medium
+                self.reasoning_max_tokens_slider.setValue(16000)  # ~50% of 32000
+            elif index == 3:  # High
+                self.reasoning_max_tokens_slider.setValue(32000)  # ~80% of max (64000 max)
+            self.update_reasoning_max_tokens_label(self.reasoning_max_tokens_slider.value())
+
+    def update_reasoning_max_tokens_label(self, value=None):
+        """
+        Updates the label showing the max tokens for reasoning.
+        """
+        if value is None:
+            value = self.reasoning_max_tokens_slider.value()
+        self.reasoning_max_tokens_value_label.setText(str(value))
 
 def main():
     """

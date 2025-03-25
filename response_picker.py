@@ -14,12 +14,15 @@ class ChoiceWidget(QWidget):
     A custom widget that combines a QRadioButton with a QLabel to display
     a radio button alongside HTML-wrapped text.
     """
-    def __init__(self, text, index, parent=None):
+    def __init__(self, text, index, reasoning=None, parent=None):
         super().__init__(parent)
         self.markdown_text = text  # Store the original Markdown text
-        layout = QHBoxLayout(self)
+        self.reasoning_text = reasoning  # Store the original reasoning text
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
 
+        # Create the radio button and label layout
+        radio_layout = QHBoxLayout()
         self.radio_button = QRadioButton()
         self.label = QTextBrowser()  # Use QTextBrowser for better HTML rendering
         
@@ -32,8 +35,32 @@ class ChoiceWidget(QWidget):
         self.label.setStyleSheet("QTextBrowser { background-color: transparent; border: none; }")
         self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-        layout.addWidget(self.radio_button)
-        layout.addWidget(self.label)
+        radio_layout.addWidget(self.radio_button)
+        radio_layout.addWidget(self.label)
+        layout.addLayout(radio_layout)
+
+        # Add reasoning if available
+        if reasoning:
+            # Create a divider
+            divider = QFrame()
+            divider.setFrameShape(QFrame.HLine)
+            divider.setFrameShadow(QFrame.Sunken)
+            layout.addWidget(divider)
+            
+            # Add reasoning section with label
+            reasoning_header = QLabel("<b>Reasoning:</b>")
+            layout.addWidget(reasoning_header)
+            
+            # Create reasoning browser
+            self.reasoning_browser = QTextBrowser()
+            reasoning_html = mdizer.markdown_to_html(self.reasoning_text)
+            self.reasoning_browser.setHtml(f"<div style='max-width: 350px; word-wrap: break-word;'>{reasoning_html}</div>")
+            self.reasoning_browser.setReadOnly(True)
+            self.reasoning_browser.setOpenExternalLinks(True)
+            self.reasoning_browser.setStyleSheet("QTextBrowser { background-color: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 5px; padding: 5px; max-height: 150px; }")
+            self.reasoning_browser.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            self.reasoning_browser.setMaximumHeight(150)  # Limit height
+            layout.addWidget(self.reasoning_browser)
 
         self.setLayout(layout)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -45,6 +72,7 @@ class ResponsePicker(QDialog):
         self.setWindowTitle("Select a Response")
         self.setWindowIcon(QIcon("path/to/icon.png"))  # Set an appropriate icon
         self.selected_content = None
+        self.selected_reasoning = None
         self.initUI(choices)
         self.applyStyles()
 
@@ -92,9 +120,10 @@ class ResponsePicker(QDialog):
 
         for idx, choice in enumerate(choices):
             content = choice["message"]["content"].strip()
+            reasoning = choice["message"].get("reasoning", "")
 
             # Create the custom ChoiceWidget
-            choice_widget = ChoiceWidget(content, idx)
+            choice_widget = ChoiceWidget(content, idx, reasoning)
             self.choice_buttons.addButton(choice_widget.radio_button, idx)
 
             # Add to layout
@@ -178,12 +207,16 @@ class ResponsePicker(QDialog):
             # No selection made
             return
         selected_widget = self.choice_widgets[selected_id]
-        # Retrieve the original Markdown content
+        # Retrieve the original Markdown content and reasoning
         self.selected_content = selected_widget.markdown_text
+        self.selected_reasoning = selected_widget.reasoning_text
         self.accept()
 
     def get_selected_content(self):
         return self.selected_content
+        
+    def get_selected_reasoning(self):
+        return self.selected_reasoning
 
     def on_choice_selected(self, button):
         self.select_button.setEnabled(True)
