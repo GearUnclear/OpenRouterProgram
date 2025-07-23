@@ -1,5 +1,5 @@
 PyQt5==5.15.9
-requests==2.32.0
+requests==2.32.4
 markdown==3.4.3
 beautifulsoup4==4.12.2
 pywin32==306
